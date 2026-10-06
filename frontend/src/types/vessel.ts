@@ -33,7 +33,52 @@ export interface FishingVessel {
   owner: string;
   /** 证书有效期（YYYY-MM-DD） */
   certificateExpiry: string;
+  /** 档案版本号（乐观锁：每次变更 +1，旧页面提交时据此提示重载） */
+  version: number;
   createdAt: string;
+}
+
+/** 档案变更状态：pending 待生效（在港等最后一条航次结束）/ effective 已生效 */
+export type VesselChangeStatus = 'pending' | 'effective';
+
+/**
+ * 渔船档案变更记录（过户 / 更名 / 转港）。
+ * 只记录船名、船籍港、船主三项可变更内容，生效前档案照旧；
+ * 历史流水、泊位占用与时间线按「当时船名」留存快照，不随变更被覆盖。
+ */
+export interface VesselChange {
+  id: string;
+  /** 所属渔船 id */
+  vesselId: string;
+  /** 变更后的档案版本号（乐观锁，提交成功即 +1） */
+  version: number;
+  /** 变更后船名 */
+  name: string;
+  /** 变更后船籍港 */
+  homePort: string;
+  /** 变更后船主 */
+  owner: string;
+  /** 生效时间（ISO 字符串）；生效前照旧 */
+  effectiveAt: string;
+  /** 状态：pending 待生效 / effective 已生效 */
+  status: VesselChangeStatus;
+  /** 提交时的基础版本（乐观锁 compare-and-swap） */
+  baseVersion: number;
+  /** 变更原因 / 备注 */
+  reason?: string;
+  createdAt: string;
+  /** 实际生效时间（ISO 字符串） */
+  appliedAt?: string;
+}
+
+/** 档案变更表单模型 */
+export interface VesselChangeInput {
+  name: string;
+  homePort: string;
+  owner: string;
+  /** 生效时间（datetime-local 值 YYYY-MM-DDTHH:mm） */
+  effectiveAt: string;
+  reason?: string;
 }
 
 /** 渔船检索条件（作业类型 + 功率区间 + 吨位 + 船籍港组合查询） */

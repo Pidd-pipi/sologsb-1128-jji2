@@ -4,10 +4,12 @@ import { useRoute, useRouter } from 'vue-router';
 import { useVesselStore } from '../stores/vesselStore';
 import { usePortStore } from '../stores/portStore';
 import VesselSpecTable from '../components/common/VesselSpecTable.vue';
+import VesselChangeDialog from '../components/common/VesselChangeDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import type { PortCall } from '../types/call';
+import type { VesselChange } from '../types/vessel';
 import { daysUntilExpiry, expiryText, powerTier, tonnageTier } from '../utils/tonnage';
-import { formatDateTime, formatNumber } from '../utils/format';
+import { formatDateTime, formatDate, formatNumber } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
@@ -18,7 +20,17 @@ const vesselId = computed(() => String(route.params.id ?? ''));
 const vessel = computed(() => vesselStore.vesselById(vesselId.value));
 const loaded = ref(false);
 
+const changeDialogVisible = ref(false);
+
 const calls = computed<PortCall[]>(() => (vessel.value ? portStore.callsOfVessel(vessel.value.id) : []));
+
+/** 该船的档案变更记录（按版本升序） */
+const changes = computed<VesselChange[]>(() =>
+  vessel.value ? vesselStore.changesOf(vessel.value.id) : [],
+);
+
+/** 待生效变更（在港等航次结束 / 等生效时间） */
+const pendingChanges = computed<VesselChange[]>(() => changes.value.filter((c) => c.status === 'pending'));
 
 const occupancy = computed(() => {
   if (!vessel.value) return [] as Array<{ portName: string; berthNo: string; berthAt: string | null }>;
@@ -54,6 +66,8 @@ function timelineType(call: PortCall): 'primary' | 'success' {
 async function bootstrap(): Promise<void> {
   if (!vesselStore.vessels.length) await vesselStore.loadAll();
   if (!portStore.calls.length) await portStore.loadAll();
+  // 进入详情时先落地到期的待生效变更（如在港期间航次已结束）
+  if (vesselId.value) await vesselStore.processDue(vesselId.value);
   loaded.value = true;
 }
 
@@ -79,9 +93,24 @@ watch(vesselId, bootstrap);
         <div class="page__head-actions">
           <el-tag effect="dark">{{ vessel.operationType }}</el-tag>
           <el-tag type="info" effect="plain">{{ vessel.hullMaterial }}</el-tag>
-          <el-button type="primary" @click="router.push('/calls')">登记进出港</el-button>
+          <el-button type="primary" data-testid="open-change-dialog" @click="changeDialogVisible = true">档案变更</el-button>
+          <el-button @click="router.push('/calls')">登记进出港</el-button>
         </div>
       </header>
+
+      <el-alert
+        v-for="c in pendingChanges"
+        :key="c.id"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="pending-alert"
+        :title="`变更待生效：${c.name}（${c.homePort} · ${c.owner}），${formatDateTime(c.effectiveAt)} 生效${
+          portStore.berths.some((b) => b.vesselId === vessel?.id && b.status === '占用')
+            ? '；当前在港，将在最后一条航次结束（出港）后生效'
+            : ''
+        }`"
+      />
 
       <el-row :gutter="16">
         <el-col :lg="16" :md="24">
@@ -134,6 +163,13 @@ watch(vesselId, bootstrap);
           >
             <div class="timeline-row">
               <el-tag size="small" :type="call.type === '进港' ? 'primary' : 'success'">{{ call.type }}</el-tag>
+              <el-tag
+                v-if="call.vesselName && call.vesselName !== vessel.name"
+                size="small"
+                type="warning"
+                effect="plain"
+                data-testid="former-name-tag"
+              >曾用名 {{ call.vesselName }}</el-tag>
               <span>泊位 {{ call.berthNo }}</span>
               <span>加冰 {{ formatNumber(call.iceKg, 0) }} kg</span>
               <span>加油 {{ formatNumber(call.fuelL, 0) }} L</span>
@@ -146,11 +182,48 @@ watch(vesselId, bootstrap);
           <el-button type="primary" @click="router.push('/calls')">登记进出港</el-button>
         </EmptyState>
       </el-card>
+
+      <el-card shadow="never" class="detail-card">
+        <template #header><span class="card-title">档案变更记录（{{ changes.length }} 条）</span></template>
+        <el-table :data="changes" size="small" border empty-text="暂无档案变更记录" data-testid="change-history-table">
+          <el-table-column label="版本" width="70">
+            <template #default="scope">
+              <el-tag size="small" :type="scope.row.status === 'pending' ? 'warning' : 'info'" effect="plain">
+                v{{ scope.row.version }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="船名" min-width="130" />
+          <el-table-column prop="homePort" label="船籍港" min-width="90" />
+          <el-table-column prop="owner" label="船主" min-width="90" />
+          <el-table-column label="生效时间" min-width="150">
+            <template #default="scope">{{ formatDateTime(scope.row.effectiveAt) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="scope">
+              <el-tag size="small" :type="scope.row.status === 'pending' ? 'warning' : 'success'">
+                {{ scope.row.status === 'pending' ? '待生效' : '已生效' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="reason" label="变更原因" min-width="120">
+            <template #default="scope">{{ scope.row.reason || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="登记时间" min-width="150">
+            <template #default="scope">{{ formatDate(scope.row.createdAt) }}</template>
+          </el-table-column>
+        </el-table>
+        <p class="detail-hint">
+          生效前照旧：待生效期间流水与泊位仍按原船名登记；生效后按新档案登记，历史记录保留当时船名。
+        </p>
+      </el-card>
     </template>
 
     <EmptyState v-else-if="loaded" title="未找到该渔船" description="该渔船档案可能尚未建立，返回检索页建档后再查看。">
       <el-button type="primary" @click="router.push('/vessels')">返回渔船检索</el-button>
     </EmptyState>
+
+    <VesselChangeDialog v-model="changeDialogVisible" :vessel="vessel ?? null" @changed="bootstrap" />
   </section>
 </template>
 
@@ -197,5 +270,14 @@ watch(vesselId, bootstrap);
   flex-wrap: wrap;
   font-size: 13px;
   color: #4b5c6d;
+}
+.detail-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #6b7c8c;
+}
+.pending-alert {
+  margin-bottom: 16px;
+  border-radius: 10px;
 }
 </style>

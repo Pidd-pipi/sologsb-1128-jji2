@@ -1,5 +1,5 @@
 import type { FishingPort } from '../types/port';
-import type { FishingVessel } from '../types/vessel';
+import type { FishingVessel, VesselChange } from '../types/vessel';
 import type { PortCall } from '../types/call';
 import { toPlain } from '../utils/format';
 import { db } from './index';
@@ -88,6 +88,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '林海平',
     certificateExpiry: '2027-06-30',
+    version: 1,
     createdAt: daysAgo(300),
   },
   {
@@ -103,6 +104,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '王阿明',
     certificateExpiry: '2026-11-15',
+    version: 1,
     createdAt: daysAgo(260),
   },
   {
@@ -118,6 +120,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '木质',
     owner: '郑友良',
     certificateExpiry: '2026-02-28',
+    version: 1,
     createdAt: daysAgo(210),
   },
   {
@@ -133,6 +136,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '玻璃钢',
     owner: '陈小军',
     certificateExpiry: '2027-03-20',
+    version: 1,
     createdAt: daysAgo(180),
   },
   {
@@ -148,6 +152,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '张卫国',
     certificateExpiry: '2028-01-10',
+    version: 1,
     createdAt: daysAgo(120),
   },
   {
@@ -163,9 +168,25 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '铝合金',
     owner: '刘建军',
     certificateExpiry: '2026-08-05',
+    version: 1,
     createdAt: daysAgo(90),
   },
 ];
+
+/** 初始档案变更记录：每条渔船的「初始建档」版本（v4 起与 vessels.version 配套） */
+export const SEED_VESSEL_CHANGES: VesselChange[] = SEED_VESSELS.map((v) => ({
+  id: `vc-${v.id}`,
+  vesselId: v.id,
+  version: 1,
+  name: v.name,
+  homePort: v.homePort,
+  owner: v.owner,
+  effectiveAt: v.createdAt,
+  status: 'effective',
+  baseVersion: 0,
+  reason: '初始建档',
+  createdAt: v.createdAt,
+}));
 
 /** 初始进出港流水 */
 export const SEED_CALLS: PortCall[] = [
@@ -285,12 +306,38 @@ export async function ensureSeedData(): Promise<void> {
     await db.ports.bulkPut(toPlain(SEED_PORTS));
     await db.vessels.bulkPut(toPlain(SEED_VESSELS));
     await db.calls.bulkPut(toPlain(SEED_CALLS));
+    await db.vesselChanges.bulkPut(toPlain(SEED_VESSEL_CHANGES));
   }
   const ports = await db.ports.toArray();
   for (const port of ports) {
     const existing = await db.berths.where('portId').equals(port.id).count();
     if (existing === 0) {
       await db.berths.bulkPut(toPlain(buildBerthRecords(port)));
+    }
+  }
+  // 兜底：旧库若缺版本 / 初始变更记录（v4 迁移未覆盖的极端情况），按当前档案回填
+  for (const vessel of await db.vessels.toArray()) {
+    if (vessel.version == null) {
+      await db.vessels.update(vessel.id, { version: 1 });
+      vessel.version = 1;
+    }
+    const changeCount = await db.vesselChanges.where('vesselId').equals(vessel.id).count();
+    if (changeCount === 0) {
+      await db.vesselChanges.put(
+        toPlain({
+          id: `vc-${vessel.id}`,
+          vesselId: vessel.id,
+          version: 1,
+          name: vessel.name,
+          homePort: vessel.homePort,
+          owner: vessel.owner,
+          effectiveAt: vessel.createdAt,
+          status: 'effective',
+          baseVersion: 0,
+          reason: '初始建档（旧数据回填）',
+          createdAt: vessel.createdAt,
+        }),
+      );
     }
   }
 }

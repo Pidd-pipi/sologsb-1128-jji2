@@ -1,19 +1,22 @@
 import Dexie, { type Table } from 'dexie';
 import type { FishingPort } from '../types/port';
-import type { FishingVessel } from '../types/vessel';
+import type { FishingVessel, VesselChange } from '../types/vessel';
 import type { PortCall } from '../types/call';
 import type { Berth } from '../types/berth';
 import { buildBerthRecords } from './berth';
+import { backfillVesselChanges } from './vesselChange';
 
 /**
  * gbfishport-db：库名固定为 gbfishport-db
- * v1 建 ports / vessels；v2 新增 calls 表与 vesselId 索引；v3 新增 berths 表并按泊位数生成初始记录。
+ * v1 建 ports / vessels；v2 新增 calls 表与 vesselId 索引；v3 新增 berths 表并按泊位数生成初始记录；
+ * v4 新增 vesselChanges 表（档案变更与乐观锁版本），并为缺版本的旧数据回填版本号与初始变更记录。
  */
 export class FishPortDatabase extends Dexie {
   ports!: Table<FishingPort, string>;
   vessels!: Table<FishingVessel, string>;
   calls!: Table<PortCall, string>;
   berths!: Table<Berth, string>;
+  vesselChanges!: Table<VesselChange, string>;
 
   constructor() {
     super('gbfishport-db');
@@ -52,6 +55,18 @@ export class FishPortDatabase extends Dexie {
             await berthTable.bulkPut(buildBerthRecords(port));
           }
         }
+      });
+
+    this.version(4)
+      .stores({
+        // 档案变更按渔船 + 版本检索；vessels 增加 version 索引列用于乐观锁
+        vesselChanges: 'id, vesselId, version, status, effectiveAt',
+        vessels: 'id, vesselNo, homePort, operationType, enginePower, grossTonnage, version',
+      })
+      .upgrade(async (tx) => {
+        // v4 迁移：缺版本的旧渔船档案回填版本号 1，补一条「初始建档」变更记录，
+        // 并补齐流水 / 泊位上缺失的船名快照（旧数据升级回填）。
+        await backfillVesselChanges(tx);
       });
   }
 }

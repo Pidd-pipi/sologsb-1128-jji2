@@ -6,6 +6,7 @@ import { emptyPortFilter, type FishingPort, type PortFilter, type SupplyCapabili
 import type { Berth, BerthStatus } from '../types/berth';
 import type { CallDraft, PortCall } from '../types/call';
 import { buildBerthRecords } from '../db/berth';
+import { useVesselStore } from './vesselStore';
 
 export interface PortInput {
   name: string;
@@ -143,8 +144,24 @@ export const usePortStore = defineStore('port', () => {
 
   /**
    * 登记一条进出港记录，并同步泊位占用状态（进港 → 占用，出港 → 释放）。
+   *
+   * 档案变更衔接：进港登记前先落地到期的待生效变更（按新档案登记）；
+   * 出港登记表示最后一条航次结束、泊位已释放，此前因「船还在港」挂起的
+   * 变更此刻生效。流水与泊位始终按登记当时的船名留存快照，不随档案变更被覆盖。
    */
-  async function registerCall(draft: CallDraft, vesselName: string, portId: string): Promise<PortCall> {
+  async function registerCall(draft: CallDraft, passedVesselName: string, portId: string): Promise<PortCall> {
+    const vesselStore = useVesselStore();
+    const isOutbound = draft.type === '出港';
+
+    if (!isOutbound) {
+      // 进港：先把到期的待生效变更落地，再按新档案登记
+      await vesselStore.processDue(draft.vesselId);
+    }
+
+    // 以渔船档案当前船名为准（变更生效后，流水 / 泊位快照同步使用新船名）
+    const vessel = vesselStore.vesselById(draft.vesselId);
+    const vesselName = vessel?.name ?? passedVesselName;
+
     const call: PortCall = {
       id: uid('c'),
       vesselId: draft.vesselId,
@@ -183,6 +200,11 @@ export const usePortStore = defineStore('port', () => {
             };
       await db.berths.put(toPlain(next));
       berths.value = berths.value.map((b) => (b.id === berth.id ? next : b));
+    }
+
+    if (isOutbound) {
+      // 航次结束：泊位已释放，挂起的变更（在港等最后一条航次结束）现在生效
+      await vesselStore.processDue(draft.vesselId);
     }
     return call;
   }
