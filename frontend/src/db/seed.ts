@@ -1,9 +1,11 @@
 import type { FishingPort } from '../types/port';
 import type { FishingVessel } from '../types/vessel';
 import type { PortCall } from '../types/call';
+import type { VesselVersion } from '../types/vesselVersion';
 import { toPlain } from '../utils/format';
 import { db } from './index';
 import { buildBerthRecords } from './berth';
+import { addBaselineVersion } from './vesselArchive';
 
 function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 3600 * 1000).toISOString();
@@ -88,6 +90,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '林海平',
     certificateExpiry: '2027-06-30',
+    rev: 1,
     createdAt: daysAgo(300),
   },
   {
@@ -103,6 +106,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '王阿明',
     certificateExpiry: '2026-11-15',
+    rev: 1,
     createdAt: daysAgo(260),
   },
   {
@@ -118,6 +122,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '木质',
     owner: '郑友良',
     certificateExpiry: '2026-02-28',
+    rev: 1,
     createdAt: daysAgo(210),
   },
   {
@@ -133,6 +138,7 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '玻璃钢',
     owner: '陈小军',
     certificateExpiry: '2027-03-20',
+    rev: 1,
     createdAt: daysAgo(180),
   },
   {
@@ -148,11 +154,12 @@ export const SEED_VESSELS: FishingVessel[] = [
     hullMaterial: '钢质',
     owner: '张卫国',
     certificateExpiry: '2028-01-10',
+    rev: 1,
     createdAt: daysAgo(120),
   },
   {
     id: 'v-2006',
-    name: '浙普渔13566',
+    name: '浙普渔13599',
     vesselNo: 'ZPY13566',
     homePort: '沈家门',
     length: 21.5,
@@ -161,8 +168,9 @@ export const SEED_VESSELS: FishingVessel[] = [
     enginePower: 132,
     operationType: '围网',
     hullMaterial: '铝合金',
-    owner: '刘建军',
+    owner: '周永福',
     certificateExpiry: '2026-08-05',
+    rev: 2,
     createdAt: daysAgo(90),
   },
 ];
@@ -237,7 +245,7 @@ export const SEED_CALLS: PortCall[] = [
   {
     id: 'c-3006',
     vesselId: 'v-2006',
-    vesselName: '浙普渔13566',
+    vesselName: '浙普渔13599',
     type: '进港',
     time: daysAgo(1),
     berthNo: 'B02',
@@ -246,6 +254,33 @@ export const SEED_CALLS: PortCall[] = [
     unloadKg: 3600,
     visaStatus: '已签证',
     createdAt: daysAgo(1),
+  },
+  {
+    // 更名前的历史流水，船名是当时快照，永久保留旧名
+    id: 'c-3009',
+    vesselId: 'v-2006',
+    vesselName: '浙普渔13566',
+    type: '进港',
+    time: daysAgo(40),
+    berthNo: 'B04',
+    iceKg: 420,
+    fuelL: 280,
+    unloadKg: 3100,
+    visaStatus: '已签证',
+    createdAt: daysAgo(40),
+  },
+  {
+    id: 'c-3010',
+    vesselId: 'v-2006',
+    vesselName: '浙普渔13566',
+    type: '出港',
+    time: daysAgo(38),
+    berthNo: 'B04',
+    iceKg: 0,
+    fuelL: 360,
+    unloadKg: 0,
+    visaStatus: '已签证',
+    createdAt: daysAgo(38),
   },
   {
     id: 'c-3007',
@@ -276,6 +311,45 @@ export const SEED_CALLS: PortCall[] = [
 ];
 
 /**
+ * 演示用档案版本：v-2006 在 30 天前过户更名（旧名 浙普渔13566 / 刘建军 → 新名 浙普渔13599 / 周永福）。
+ * 历史流水 c-3009 / c-3010 仍保留旧船名，可按当时船名追溯同一艘船。
+ */
+export const SEED_VERSION_OVERRIDES: Record<string, VesselVersion[]> = {
+  'v-2006': [
+    {
+      id: 'vv-2006-1',
+      vesselId: 'v-2006',
+      versionNo: 1,
+      status: 'superseded',
+      name: '浙普渔13566',
+      homePort: '沈家门',
+      owner: '刘建军',
+      reason: '初始档案',
+      requestedAt: daysAgo(90),
+      effectiveAt: daysAgo(90),
+      appliedAt: daysAgo(90),
+      endedAt: daysAgo(30),
+      awaitingVoyage: false,
+    },
+    {
+      id: 'vv-2006-2',
+      vesselId: 'v-2006',
+      versionNo: 2,
+      status: 'current',
+      name: '浙普渔13599',
+      homePort: '沈家门',
+      owner: '周永福',
+      reason: '船舶过户更名',
+      requestedAt: daysAgo(30),
+      effectiveAt: daysAgo(30),
+      appliedAt: daysAgo(30),
+      endedAt: null,
+      awaitingVoyage: false,
+    },
+  ],
+};
+
+/**
  * 首次进入时写入演示数据，并为缺少泊位记录的渔港补齐泊位。
  * 写库前统一 toPlain 脱代理，避免 DataCloneError。
  */
@@ -285,6 +359,15 @@ export async function ensureSeedData(): Promise<void> {
     await db.ports.bulkPut(toPlain(SEED_PORTS));
     await db.vessels.bulkPut(toPlain(SEED_VESSELS));
     await db.calls.bulkPut(toPlain(SEED_CALLS));
+    // 与渔船档案一起写入档案版本（SCD2 起点）；有预置版本链的用预置版本
+    for (const vessel of SEED_VESSELS) {
+      const override = SEED_VERSION_OVERRIDES[vessel.id];
+      if (override) {
+        await db.vesselVersions.bulkPut(toPlain(override));
+      } else {
+        await addBaselineVersion(vessel);
+      }
+    }
   }
   const ports = await db.ports.toArray();
   for (const port of ports) {

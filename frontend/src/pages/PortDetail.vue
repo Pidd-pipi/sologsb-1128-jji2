@@ -43,6 +43,12 @@ const recentCalls = computed(() => {
 
 const supply = computed(() => (port.value ? supplyText(port.value.supply) : '—'));
 
+/** 流水上的船名若与该船当前船名不同，说明是更名前的历史快照 */
+function isFormerCallName(call: { vesselId: string; vesselName: string }): boolean {
+  const current = vesselStore.vesselById(call.vesselId);
+  return Boolean(current) && current!.name !== call.vesselName;
+}
+
 const loaded = ref(false);
 
 async function bootstrap(): Promise<void> {
@@ -197,7 +203,20 @@ function onMapSelect(selectedPortId: string): void {
           <el-card shadow="never" class="detail-card">
             <template #header><span class="card-title">近日流水</span></template>
             <el-table :data="recentCalls" size="small" border empty-text="暂无进出港流水">
-              <el-table-column prop="vesselName" label="船名" min-width="120" />
+              <el-table-column label="船名（登记当时）" min-width="150">
+                <template #default="scope">
+                  {{ scope.row.vesselName }}
+                  <el-tag
+                    v-if="isFormerCallName(scope.row)"
+                    size="small"
+                    type="info"
+                    effect="plain"
+                    data-testid="former-call-tag"
+                  >
+                    曾用名
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column prop="type" label="类型" width="80" />
               <el-table-column label="时间" min-width="150">
                 <template #default="scope">{{ formatDateTime(scope.row.time) }}</template>

@@ -11,9 +11,9 @@ export const VISA_STATUSES: VisaStatus[] = ['已签证', '待签证', '免签'];
 /** 进出港记录 */
 export interface PortCall {
   id: string;
-  /** 渔船 id */
+  /** 渔船 id（稳定主键，更名过户后历史流水仍指向同一艘船） */
   vesselId: string;
-  /** 渔船名（冗余，便于流水展示） */
+  /** 登记当时的船名快照，档案变更后绝不回写，保证历史流水可按当时船名追溯 */
   vesselName: string;
   /** 类型：进港 / 出港 */
   type: CallType;

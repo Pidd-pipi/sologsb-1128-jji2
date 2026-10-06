@@ -148,8 +148,11 @@ async function submit(): Promise<void> {
       unloadKg: Number(form.value.unloadKg) || 0,
       visaStatus: form.value.visaStatus,
     };
-    const call = await portStore.registerCall(payload, selectedVessel.value.name, form.value.portId);
+    const { call, appliedVersion } = await portStore.registerCall(payload, form.value.portId);
     ElMessage.success(`已登记 ${call.vesselName} ${call.type} · 泊位 ${call.berthNo}`);
+    if (appliedVersion) {
+      ElMessage.success(`该笔流水后渔船档案已按新船名「${appliedVersion.name}」生效`);
+    }
     clearDraft();
     Object.assign(form.value, {
       ...emptyCallDraft(),
@@ -166,6 +169,12 @@ async function submit(): Promise<void> {
 
 function openVessel(vesselId: string): void {
   void router.push(`/vessels/${vesselId}`);
+}
+
+/** 流水船名与该船当前名不同 → 更名前的历史快照 */
+function isFormerCallName(call: { vesselId: string; vesselName: string }): boolean {
+  const current = vesselStore.vesselById(call.vesselId);
+  return Boolean(current) && current!.name !== call.vesselName;
 }
 </script>
 
@@ -206,7 +215,15 @@ function openVessel(vesselId: string): void {
                   :key="v.id"
                   :label="`${v.name}（${v.homePort} · ${formatNumber(v.enginePower, 0)}kW）`"
                   :value="v.id"
-                />
+                >
+                  <span>{{ v.name }}</span>
+                  <span
+                    v-for="fn in vesselStore.formerNames(v.id)"
+                    :key="fn"
+                    class="former-name-opt"
+                  >（曾用名 {{ fn }}）</span>
+                  <span style="float: right; color: #97a6b4; font-size: 12px">{{ v.homePort }}</span>
+                </el-option>
               </el-select>
             </el-form-item>
 
@@ -306,7 +323,20 @@ function openVessel(vesselId: string): void {
     <el-card shadow="never" class="detail-card">
       <template #header><span class="card-title">今日流水（{{ todayCalls.length }} 条）</span></template>
       <el-table :data="todayCalls" size="small" border empty-text="今日暂无进出港流水" data-testid="today-calls">
-        <el-table-column prop="vesselName" label="船名" min-width="130" />
+        <el-table-column label="船名（当时）" min-width="150">
+          <template #default="scope">
+            {{ scope.row.vesselName }}
+            <el-tag
+              v-if="isFormerCallName(scope.row)"
+              size="small"
+              type="info"
+              effect="plain"
+              data-testid="today-former-call-tag"
+            >
+              曾用名
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="type" label="类型" width="80" />
         <el-table-column label="时间" min-width="150">
           <template #default="scope">{{ formatDateTime(scope.row.time) }}</template>
@@ -376,5 +406,9 @@ function openVessel(vesselId: string): void {
   margin: 10px 0 0;
   font-size: 12px;
   color: #6b7c8c;
+}
+.former-name-opt {
+  color: #97a6b4;
+  font-size: 12px;
 }
 </style>

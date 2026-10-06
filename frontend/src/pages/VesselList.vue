@@ -96,6 +96,16 @@ function openVessel(vesselId: string): void {
       <el-form label-width="96px" label-position="left">
         <el-row :gutter="12">
           <el-col :lg="8" :md="12" :sm="24">
+            <el-form-item label="船名">
+              <el-input
+                id="query-name"
+                v-model="vesselStore.query.name"
+                placeholder="当前船名或曾用名，可查同一艘船"
+                clearable
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :lg="8" :md="12" :sm="24">
             <el-form-item label="作业类型">
               <el-select id="query-op-type" v-model="vesselStore.query.operationType" placeholder="全部作业类型" clearable style="width: 100%">
                 <el-option v-for="type in OPERATION_TYPES" :key="type" :label="type" :value="type" />

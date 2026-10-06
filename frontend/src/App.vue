@@ -4,9 +4,13 @@ import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Location, MapLocation, Tickets, Van } from '@element-plus/icons-vue';
 import { useUiStore } from './stores/uiStore';
+import { useScheduledArchiveTicker } from './hooks/useScheduledArchiveTicker';
 
 const route = useRoute();
 const uiStore = useUiStore();
+
+// 到点的排期档案（船在海上）自动生效
+useScheduledArchiveTicker();
 
 const activePath = computed(() => {
   const path = route.path;
